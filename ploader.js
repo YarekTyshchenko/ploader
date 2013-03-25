@@ -42,11 +42,9 @@ function Ploader() {
      * Read the dir for current plugin files
      * @param  {Object} pluginFiles    Cache of plugin files and watch descriptors
      * @param  {String} folder         Path to folder
-     * @param  {Function} addCallback
-     * @param  {Function} readCallback
-     * @param  {Function} removeCallback
+     * @param  {Object} callbacks
      */
-    var readPlugins = function(pluginFiles, folder, addCallback, readCallback, removeCallback) {
+    var readPlugins = function(pluginFiles, folder, callbacks) {
         var newPlugins = getNewPlugins(folder);
         // Load added plugins
         _.difference(newPlugins, Object.keys(pluginFiles)).forEach(function(file) {
@@ -54,7 +52,7 @@ function Ploader() {
             var resolvedPath = path.resolve(folder);
             // Load the plugin
             safeRequire(filename, function(plugin) {
-                addCallback(plugin, file);
+                callbacks.add(plugin, file);
             });
             // Attach fs watcher
             var watch = fs.watch(filename, (function(){
@@ -76,7 +74,7 @@ function Ploader() {
 
                         // Require cache file
                         safeRequire(currentCacheName, function(plugin) {
-                            readCallback(plugin, file);
+                            callbacks.read(plugin, file);
                         });
                     }
                     previous = current;
@@ -88,7 +86,7 @@ function Ploader() {
         // Unload removed plugins
         _.difference(Object.keys(pluginFiles), newPlugins).forEach(function(file) {
             // Delete the plugin from plugins hash
-            removeCallback(file);
+            callbacks.remove(file);
             // Unwatch the file
             pluginFiles[file].close();
             delete pluginFiles[file];
@@ -99,12 +97,10 @@ function Ploader() {
         /**
          * Listen to changes to this directory
          * @param  {String}   pluginPath      Path to the watched dir
-         * @param  {Function} addCallback
-         * @param  {Function} readCallback
-         * @param  {Function} removeCallback
+         * @param  {Object} Callbacks
          * @return {Object} Object used for unwatch function
          */
-        watch: function(pluginPath, addCallback, readCallback, removeCallback) {
+        watch: function(pluginPath, callbacks) {
             // Clear the dir of previous cache files
             fs.readdirSync(pluginPath).forEach(function(file) {
                 if (/\..*_\d+$/.test(file)) {
@@ -114,10 +110,10 @@ function Ploader() {
                 }
             });
             var pluginFiles = {};
-            readPlugins(pluginFiles, pluginPath, addCallback, readCallback, removeCallback);
+            readPlugins(pluginFiles, pluginPath, callbacks);
             // Watch folder for plugin additions or deletions
             var watch = fs.watch(pluginPath, function() {
-                readPlugins(pluginFiles, pluginPath, addCallback, readCallback, removeCallback);
+                readPlugins(pluginFiles, pluginPath, callbacks);
             });
             return {
                 plugins: pluginFiles,
