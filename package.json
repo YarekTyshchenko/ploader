@@ -1,6 +1,6 @@
 {
   "name": "ploader",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Plugin Loader - Dynamically requires plugins from a directory when their source code has been updated",
   "main": "ploader.js",
   "scripts": {

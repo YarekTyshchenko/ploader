@@ -25,16 +25,15 @@ function Ploader() {
      * @param  {function} errorCallback On Error
      */
     var safeRequire = function(file, callback, errorCallback) {
-        errorCallback = errorCallback || function(e){
-            console.log(e);
+        errorCallback = errorCallback || function(file, e){
+            console.log('Error in plugin:', file, e);
         };
 
         try {
             var plugin = require(file);
             callback(plugin);
         } catch (e) {
-            console.log('Error in plugin:', file);
-            console.log(e);
+            errorCallback(file, e);
         }
     }
 
@@ -46,51 +45,53 @@ function Ploader() {
      */
     var readPlugins = function(pluginFiles, folder, callbacks) {
         var newPlugins = getNewPlugins(folder);
+        // Unload removed plugins
+        var resolvedPath = path.resolve(folder);
+        _.difference(Object.keys(pluginFiles), newPlugins).forEach(function(file) {
+            var mtime = pluginFiles[file];
+            // Remove previous cache file .cache.js_8273642
+            var previousCacheName = [resolvedPath,'/','.',file,'_',mtime].join('');
+            if (fs.existsSync(previousCacheName)) {
+                fs.unlinkSync(previousCacheName);
+            }
+
+            callbacks.remove(file);
+            delete pluginFiles[file];
+        });
+
+        // Refresh changed plugins
+        _.forEach(pluginFiles, function(mtime, file) {
+            var filename = path.resolve([folder,file].join('/'));
+            var current = fs.statSync(filename).mtime.getTime() / 1000;
+            if (current > mtime) {
+                // Remove previous cache file .cache.js_8273642
+                var previousCacheName = [resolvedPath,'/','.',file,'_',mtime].join('');
+                if (fs.existsSync(previousCacheName)) {
+                    fs.unlinkSync(previousCacheName);
+                }
+                // Read file contents into cache file
+                var currentCacheName = [resolvedPath,'/','.',file,'_',current].join('');
+                fs.writeFileSync(currentCacheName, fs.readFileSync(filename));
+
+                // Require cache file
+                safeRequire(currentCacheName, function(plugin) {
+                    callbacks.read(plugin, file);
+                }, callbacks.error);
+                pluginFiles[file] = current;
+            }
+        });
+
         // Load added plugins
         _.difference(newPlugins, Object.keys(pluginFiles)).forEach(function(file) {
             var filename = path.resolve([folder,file].join('/'));
-            var resolvedPath = path.resolve(folder);
             // Load the plugin
             safeRequire(filename, function(plugin) {
                 callbacks.add(plugin, file);
-            });
-            // Attach fs watcher
-            var watch = fs.watch(filename, (function(){
-                var previous = fs.statSync(filename).mtime.getTime() / 1000;
-                return function() {
-                    // Check file mtime
-                    if (! fs.existsSync(filename)) return;
-                    var current = fs.statSync(filename).mtime.getTime() / 1000;
-                    // Reload plugin memory location above
-                    if (current > previous) {
-                        // Remove previous cache file .cache.js_8273642
-                        var previousCacheName = [resolvedPath,'/','.',file,'_',previous].join('');
-                        if (fs.existsSync(previousCacheName)) {
-                            fs.unlinkSync(previousCacheName);
-                        }
-                        // Read file contents into cache file
-                        var currentCacheName = [resolvedPath,'/','.',file,'_',current].join('');
-                        fs.writeFileSync(currentCacheName, fs.readFileSync(filename));
-
-                        // Require cache file
-                        safeRequire(currentCacheName, function(plugin) {
-                            callbacks.read(plugin, file);
-                        });
-                    }
-                    previous = current;
-                }
-            })());
-
-            pluginFiles[file] = watch;
+            }, callbacks.error);
+            var current = fs.statSync(filename).mtime.getTime() / 1000;
+            pluginFiles[file] = current;
         });
-        // Unload removed plugins
-        _.difference(Object.keys(pluginFiles), newPlugins).forEach(function(file) {
-            // Delete the plugin from plugins hash
-            callbacks.remove(file);
-            // Unwatch the file
-            pluginFiles[file].close();
-            delete pluginFiles[file];
-        });
+        return;
     }
 
     return {
@@ -100,36 +101,23 @@ function Ploader() {
          * @param  {Object} Callbacks
          * @return {Object} Object used for unwatch function
          */
-        watch: function(pluginPath, callbacks) {
+        attach: function(pluginPath, callbacks) {
             // Clear the dir of previous cache files
             fs.readdirSync(pluginPath).forEach(function(file) {
                 if (/\..*_\d+$/.test(file)) {
                     // Potentially dangerous
-                    console.log('Removing old cache file:',file);
+                    //console.log('Removing old cache file:',file);
                     fs.unlinkSync(path.resolve([pluginPath,file].join('/')));
                 }
             });
             var pluginFiles = {};
             readPlugins(pluginFiles, pluginPath, callbacks);
-            // Watch folder for plugin additions or deletions
-            var watch = fs.watch(pluginPath, function() {
-                readPlugins(pluginFiles, pluginPath, callbacks);
-            });
             return {
-                plugins: pluginFiles,
-                watch: watch
-            }
-        },
-
-        /**
-         * Stop watching the a directory
-         * @param  {object} watch Object returned by watch call
-         */
-        unwatch: function(watch) {
-            watch.watch.close();
-            _.forEach(pluginFiles, function(file, w) {
-                w.close();
-            });
+                reload: function() {
+                    // Rescan the directory and rerequire modules
+                    readPlugins(pluginFiles, pluginPath, callbacks);
+                }
+            };
         }
     }
 }
