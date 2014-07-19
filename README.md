@@ -12,7 +12,7 @@ are added or removed. Below is an example of usage:
     var ploader = require('ploader');
 
     var plugins = {};
-    var loader = ploader.watch('./plugins', {
+    var loader = ploader.attach('./plugins', {
         add: function(plugin, file) {
             plugins[file] = plugin;
             console.log('Loaded plugin:', file);
